@@ -1,0 +1,73 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: ml-pipeline-
+  namespace: argo
+spec:
+  entrypoint: main
+  templates:
+  - name: main
+    steps:
+    - - name: data-preprocessing
+        template: data-preprocessing-template
+    - - name: model-training
+        template: model-training-template
+        arguments:
+          artifacts:
+          - name: preprocessed-data
+            from: "{{steps.data-preprocessing.outputs.artifacts.preprocessed-data}}"
+    - - name: model-deployment
+        template: model-deployment-template
+        arguments:
+          artifacts:
+          - name: saved-model
+            from: "{{steps.model-training.outputs.artifacts.saved-model}}"
+
+  - name: data-preprocessing-template
+    container:
+      image: data_preprocessing:latest
+      imagePullPolicy: IfNotPresent
+      command: ["python"]  
+      args: ["/app/data_preprocessing.py", "1"] 
+    outputs:
+      artifacts:
+      - name: preprocessed-data
+        path: /app/data.csv
+  
+  - name: model-training-template
+    container:
+      image: model_training:latest
+      imagePullPolicy: IfNotPresent
+      command: ["python"]  
+      args: ["/app/model_training.py"] 
+    # resources:
+    #   limits:
+    #     nvidia.com/gpu: 2  # Request 2 GPUs for this container
+    # nodeSelector:
+    #   cloud.google.com/gke-accelerator: nvidia-tesla-t4  # Use node selector to target GPU nodes
+    # tolerations:
+    #   - key: "nvidia.com/gpu"
+    #     operator: "Exists"
+    #     effect: "NoSchedule"
+    inputs:
+      artifacts:
+      - name: preprocessed-data
+        path: /app/data.csv
+    outputs:
+      artifacts:
+      - name: saved-model
+        path: /app/model.keras
+
+  - name: model-deployment-template
+    container:
+      image: model_deployment:latest
+      env:
+        - name: MLFLOW_TRACKING_URI
+          value: http://mlflow.argo.svc.cluster.local:5000
+      imagePullPolicy: IfNotPresent
+      command: ["python"]  
+      args: ["/app/model_deployment.py"] 
+    inputs:
+      artifacts:
+      - name: saved-model
+        path: /app/model.keras
